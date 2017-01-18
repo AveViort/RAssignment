@@ -1,0 +1,151 @@
+---
+title: "Assignment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+For this assignment I used RStudio 1.0.136, R 3.3.2.
+First, I loaded both CSV files:
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(readr)
+pml_training <- read_csv("C:/GitHub/R/pml-training.csv")
+pml_testing <- read_csv("C:/GitHub/R/pml-testing.csv")
+```
+
+I inspected number of records and variables:
+
+```{r, echo=TRUE}
+dim(pml_training)
+```
+
+So we had 19622 rows (records) and 160 columns. However, I noticed in View window, that there are lots of columns filled with NA. We need to clean up the data. I decided to check, how many columns contain more than a half of NA variables (and check their names):
+
+```{r, echo=TRUE}
+Exclude = colnames(pml_training[colSums(is.na(pml_training))>10000])
+summary(Exclude)
+```
+
+After that I repeated this test with 19000 instead of 10000 and got the same result. I decided to use only columns with 0 NA values:
+
+```{r, echo=TRUE}
+Include = colnames(pml_training[colSums(is.na(pml_training))==0])
+summary(Include)
+Include
+``` 
+
+So I got a new subset – only with variables, which matters. I called this subset Matters:
+```{r, echo=TRUE}
+Matters <- subset(pml_training, select = Include)
+```
+
+Next, I would like to find a covariance. But some columns are not numeric, so I have to pick only numeric ones:
+
+```{r, echo=TRUE}
+NumCol <- sapply(Matters, is.numeric)
+```
+
+Next, find covariance:
+
+```{r, echo=TRUE}
+M <- abs(cor(Matters[,NumCol]))
+diag(M) <- 0
+which(M>0.8, arr.ind=T)
+```
+
+It looked to me that data is highly correlated and I decided to raise coefficient up to 0.9:
+
+```{r, echo=TRUE}
+which(M>0.9, arr.ind=T)
+```
+
+I decided to exclude some variables: accel_belt_z, gyros_dumbbell_z, gyros_forearm_z, timestamp variables, user name and X1 variable (which is just a number of record):
+
+```{r, echo=TRUE}
+Include = setdiff(Include,c("accel_belt_z", "gyros_dumbbell_z", "gyros_forearm_z", "new_window", "num_window", "X1", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp"))
+summary(Include)
+Matters = subset(pml_training, select = Include)
+```
+
+ I decided to use the following strategy:
+1.	I will try to use random forests because of accuracy (as mentioned in the regarding lecture on week 3): in theory, because we have pretty many variables, this method should be very accurate (bit, as it was mentioned in the same lecture, random forests have tendency to overfitting).
+2.	If I have a low accuracy, I’ll combine it with other methods as was mentioned on week 4.
+   
+Loaded libraries and set seed (randomForest library should be installed):
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+library(randomForest)
+set.seed(1000)
+```
+
+I used 4096 random forests:
+
+```{r, eval=FALSE}
+RandomForestModel = randomForest(classe ~ ., data = Matters, ntree = 4096)
+```
+
+And got the following message:
+
+> Error in y - ymean : non-numeric argument to binary operator
+>
+> In addition: Warning messages:
+>
+> 1: In randomForest.default(m, y, ...) :
+>
+>   The response has five or fewer unique values.  Are you sure you want to do regression?
+>
+> 2: In mean.default(y) : argument is not numeric or logical: returning NA
+
+I checked this error in Google and discovered that this error occurs then variables are characters (in our case, it’s “classe” variable), solution is to convert variables to factors:
+
+```{r, echo=TRUE}
+Matters$classe = factor(Matters$classe)
+```
+
+After that I restarted training:
+
+```{r, echo=TRUE}
+RandomForestModel = randomForest(classe ~ ., data = Matters, ntree = 4096)
+```
+
+This was a pretty long operation, exactly as it had been mentioned in the lecture, and it took nearly 6 GB of RAM and plenty of time. After all, I had result, I observed in Environment tab:
+RandomForestModel Large randomForest.formula(19 elements, 277.8 Mb)
+Confusion matrix (indicates errors):
+
+```{r, echo=TRUE}
+RandomForestModel$confusion
+```
+
+As can be clearly seen, errors are very small, which means training set fitted well. After that I decided to test it on the testing set, but first I had additionally exclude “classe” variable from it (because we had to predict it):
+
+```{r, echo=TRUE}
+Include = setdiff(Include, c("classe"))
+Testing = subset(pml_testing, select = Include)
+dim(Testing)
+```
+
+So there were 20 records of 46 varibles (instead of 47, because “classe” was excluded). After that, I tried to predict “classe” variable:
+
+```{r, echo=TRUE}
+predict(RandomForestModel, Testing)
+```
+
+I decided to verificate the result visually. For it I took first examples of each class from the training set:
+
+```{r, echo=TRUE}    
+UniqueTraining = Matters[match(unique(Matters$classe), Matters$classe), ]
+dim(UniqueTraining)
+```
+
+Two last variables are “classe”, so after checking if all the classes are present and sorted alphabetically, I cleaned them:
+```{r, echo=TRUE}  
+UniqueTraining = UniqueTraining[,1:45]
+dim(UniqueTraining)
+```
+
+I compared visually predictions with data from training set. The chosen model fits training data, so there’s no need to combine random forests with other predictors.
+
